@@ -182,7 +182,7 @@ module Util =
         | Fable.Char
         | Fable.String -> args.Head
         | Fable.Unit | Fable.Boolean
-        | Fable.Array _ | Fable.Tuple _ | Fable.Function _ | Fable.Enum _ ->
+        | Fable.Array _ | Fable.Tuple _ | Fable.Function _ | Enum _ ->
             GlobalCall ("String", None, false, [args.Head])
             |> makeCall i.range i.returnType
         | Fable.Number _ | Fable.ExtendedNumber (Int64 | UInt64 | Decimal) ->
@@ -282,7 +282,7 @@ module Util =
             | NoNumber -> failwith "Unexpected non-number type"
         let sourceType =
             match sourceType with
-            | Fable.Enum _ -> Fable.Number Int32
+            | Enum _ -> Fable.Number Int32
             | t -> t
         match sourceType with
         | Fable.Char ->
@@ -428,7 +428,7 @@ module Util =
             CoreLibCall (modName, Some meth, false, args)
             |> makeCall range returnType
         | EntFullName "System.TimeSpan"::_
-        | (Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Fable.Enum _)::_ ->
+        | (Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Enum _)::_ ->
             apply (nativeOp argTypes.Head meth) args
         | _ ->
             ccall_ range returnType "Util" "applyOperator" (args@[makeStrConst meth])
@@ -468,7 +468,7 @@ module Util =
         | EntFullName "System.Guid"
         | EntFullName "System.TimeSpan"
         | Fable.ExtendedNumber Decimal
-        | Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Fable.Enum _ ->
+        | Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Enum _ ->
             Fable.Apply(op equal, args, Fable.ApplyMeth, i.returnType, i.range) |> Some
         | Fable.ExtendedNumber (Int64|UInt64|BigInt) ->
             icall args equal
@@ -498,7 +498,7 @@ module Util =
         | EntFullName "System.Guid"
         | EntFullName "System.TimeSpan"
         | Fable.ExtendedNumber Decimal
-        | Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Fable.Enum _ ->
+        | Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Enum _ ->
             match op with
             | Some op -> makeEqOp r args op
             | None -> ccall_ r (Fable.Number Int32) "Util" "comparePrimitives" args
@@ -514,7 +514,7 @@ module Util =
             match typArg with
             | Some(EntFullName "System.Guid")
             | Some(EntFullName "System.TimeSpan")
-            | Some(Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Fable.Enum _) ->
+            | Some(Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Enum _) ->
                 makeCoreRef "Util" (Some "comparePrimitives")
             | Some(EntFullName "System.DateTime") ->
                 emitNoInfo "(x,y) => x = x.getTime(), y = y.getTime(), x === y ? 0 : (x < y ? -1 : 1)" []
@@ -1046,7 +1046,7 @@ module AstPass =
             // | [MaybeWrapped(Fable.Value(Fable.StringConst _) as separator)]
             // | [Fable.Value(Fable.ArrayConst(Fable.ArrayValues [separator],_))] ->
             //     InstanceCall(i.callee.Value, "split", [separator]) // Optimization
-            | [arg1; Type(Fable.Enum _) as arg2] ->
+            | [arg1; Type(Enum _) as arg2] ->
                 let arg1 =
                     match arg1.Type with
                     | Fable.Array _ -> arg1
@@ -1117,7 +1117,7 @@ module AstPass =
                     [str; (if isFloat then makeNumConst 10.0 else makeIntConst 10)])
                 |> makeCall i.range i.returnType |> Some
 
-            | "parse", [str; Fable.Wrapped(Fable.Value(Fable.NumberConst(hexConst,_)), Fable.Enum _)] ->
+            | "parse", [str; Fable.Wrapped(Fable.Value(Fable.NumberConst(hexConst,_)), Enum _)] ->
                 CoreLibCall (numberModule, Some "parse", false,
                     [str; (if isFloat then makeNumConst 16.0 else makeIntConst 16)])
                 |> makeCall i.range i.returnType |> Some
@@ -1408,7 +1408,7 @@ module AstPass =
             match i.args.Length, last.Type with
             | 1, Fable.ExtendedNumber (Int64 | UInt64) ->
                 ccall i "Date" "ofTicks" i.args |> Some
-            | 7, Fable.Enum "System.DateTimeKind" ->
+            | 7, Enum("System.DateTimeKind",_) ->
                 (List.take 6 i.args)@[makeIntConst 0; last]
                 |> ccall i "Date" "create" |> Some
             | _ -> ccall i "Date" "create" i.args |> Some
@@ -1805,7 +1805,7 @@ module AstPass =
             |> Some
         | "sum" | "sumBy" ->
             match i.returnType with
-            | Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Fable.Enum _ ->
+            | Fable.Boolean | Fable.Char | Fable.String | Fable.Number _ | Enum _ ->
                 ccall "Seq" meth args |> Some
             | t ->
                 let zero = getZero t
@@ -1958,6 +1958,14 @@ module AstPass =
             | t ->
                 let genInfo = {makeGeneric=true; genericAvailability=false}
                 makeTypeRef com genInfo t |> Some
+        | _ -> None
+
+    let enums com (i: Fable.ApplyInfo) =
+        match i.methodName with
+        | "getName" ->
+            match i.args with
+            | [typRef; v] -> makeGet i.range i.returnType typRef v |> Some
+            | _ -> None
         | _ -> None
 
     let types com (info: Fable.ApplyInfo) =
@@ -2283,6 +2291,7 @@ module AstPass =
         | "Microsoft.FSharp.Collections.FSharpSet"
         | "Microsoft.FSharp.Collections.SetModule" -> mapAndSets com info
         | "System.Type" -> types com info
+        | "System.Enum" -> enums com info
         | "Microsoft.FSharp.Core.Operators.Unchecked" -> unchecked com info
         | "Microsoft.FSharp.Control.FSharpMailboxProcessor"
         | "Microsoft.FSharp.Control.FSharpAsyncReplyChannel" -> mailbox com info
@@ -2436,7 +2445,7 @@ let tryReplaceEntity (com: ICompiler) (ent: Fable.Entity) (genArgs: (string*Fabl
 
 let checkLiteral com fileName range (value: obj) (typ: Fable.Type) =
     match typ with
-    | Fable.Enum("System.Text.RegularExpressions.RegexOptions") ->
+    | Enum("System.Text.RegularExpressions.RegexOptions",_) ->
         match value with
         | :? int as i when i = int RegexOptions.IgnoreCase
                         || i = int RegexOptions.Multiline

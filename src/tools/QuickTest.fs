@@ -28,3 +28,16 @@ let equal expected actual =
 
 // You'll have to run your test manually, sorry!
 // ``My Test``()
+
+type Foo =
+    | Ja = 5
+    | HOHOHO = 8
+    | Mooo = 9
+
+let test() =
+    Enum.GetName(typeof<Foo>, Foo.Mooo) |> equal "Mooo"
+    let typRef = typeof<Foo>
+    Enum.GetName(typRef, 8) |> equal "HOHOHO"
+    Enum.GetName(typRef, 7) |> equal null
+
+test()

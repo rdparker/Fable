@@ -274,9 +274,6 @@ module Util =
                 :> TypeAnnotationInfo
         | Fable.GenericParam name ->
             upcast GenericTypeAnnotation(Identifier(name))
-        // TODO: Make union type annotation?
-        | Fable.Enum _ ->
-            upcast NumberTypeAnnotation()
         | Fable.Option genArg ->
             upcast NullableTypeAnnotation(typeAnnotation com ctx genArg)
         | Fable.DeclaredType(FullName "System.Collections.Generic.IEnumerable", [genArg]) ->
@@ -378,7 +375,7 @@ module Util =
         | :? NumericLiteral, _ -> e
         // TODO: Unsigned ints seem to cause problems, should we check only Int32 here?
         | _, Fable.Number(Int8 | Int16 | Int32)
-        | _, Fable.Enum _ ->
+        | _, Enum _ ->
             BinaryExpression(BinaryOrBitwise, e, NumericLiteral(0.), ?loc=e.loc)
             :> Expression
         | _ -> e

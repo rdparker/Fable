@@ -24,12 +24,10 @@ type Type =
     | Tuple of genericArgs: Type list
     | Function of argTypes: Type list * returnType: Type * isCurried: bool
     | GenericParam of name: string
-    | Enum of fullName: string
     | DeclaredType of Entity * genericArgs: Type list
     member x.FullName =
         match x with
         | Number numberKind -> sprintf "%A" x
-        | Enum fullName -> fullName
         | Array typ -> typ.FullName + "[]"
         | Function (argTypes, returnType, _) ->
             "(" + (argTypes |> Seq.map (fun x -> x.FullName) |> String.concat ", ") + ")=>" + returnType.FullName
@@ -58,6 +56,7 @@ type EntityKind =
     | Module
     | Union of cases: (string*Type list) list
     | Record of fields: (string*Type) list
+    | EnumKind of fields: (string*int) list
     | Exception of fields: (string*Type) list
     | Class of baseClass: (string*Expr) option * properties: (string*Type) list
     | Interface

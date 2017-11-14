@@ -6,6 +6,13 @@ let (|MaybeWrapped|) = function
     | Wrapped(e,_) -> e
     | e -> e
 
+let (|Enum|_|) = function
+    | DeclaredType(e,_) ->
+        match e.Kind with
+        | EnumKind _ -> Some(e.FullName, e)
+        | _ -> None
+    | _ -> None
+
 let (|CoreMeth|_|) coreMod meth expr =
     match expr with
     | Apply(Value(ImportRef(meth', coreMod', CoreLib)),args,ApplyMeth,_,_)
@@ -224,7 +231,7 @@ let rec makeTypeRef (com: ICompiler) (genInfo: GenericInfo) typ =
     | Boolean -> str "boolean"
     | Char
     | String -> str "string"
-    | Number _ | Enum _ -> str "number"
+    | Number _ -> str "number"
     | ExtendedNumber kind ->
         match kind with
         | Int64|UInt64 -> makeCoreRef "Long" (Some "Long")

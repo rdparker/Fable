@@ -751,9 +751,6 @@ module Types =
         // Array
         if tdef.IsArrayType
         then Fable.Array(Seq.head genArgs |> makeType com typeArgs)
-        // Enum
-        elif tdef.IsEnum
-        then Fable.Enum fullName
         // Delegate
         elif tdef.IsDelegate
         then
@@ -934,6 +931,13 @@ module Types =
             tdef.FSharpFields
             |> Seq.map (fun x -> x.Name, makeType com [] x.FieldType)
             |> Seq.toList
+        let makeEnumCases (tdef: FSharpEntity) =
+            tdef.FSharpFields
+            |> Seq.choose (fun x ->
+                match x.LiteralValue with
+                | Some(:? int as i) -> Some(x.Name, i)
+                | _ -> None)
+            |> Seq.toList
         let makeProperties (tdef: FSharpEntity) =
             tdef.TryGetMembersFunctionsAndValues
             |> Seq.choose (fun x ->
@@ -957,6 +961,7 @@ module Types =
             if tdef.IsInterface then Fable.Interface
             elif tdef.IsFSharpUnion then makeCases tdef |> Fable.Union
             elif tdef.IsFSharpRecord || tdef.IsValueType then makeFields tdef |> Fable.Record
+            elif tdef.IsEnum then makeEnumCases tdef |> Fable.EnumKind
             elif tdef.IsFSharpExceptionDeclaration then makeFields tdef |> Fable.Exception
             elif tdef.IsFSharpModule || tdef.IsNamespace then Fable.Module
             else Fable.Class(getBaseClass com tdef, makeProperties tdef)

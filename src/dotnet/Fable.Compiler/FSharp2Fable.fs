@@ -1131,6 +1131,23 @@ let private addMethodToDeclInfo com ctx (declInfo: DeclInfo) range import meth a
     declInfo.AddMethod(meth, entMember)
     ctx
 
+let private addEnumToDeclInfo com ctx (declInfo: DeclInfo) range (ent: FSharpEntity) =
+    let isPublic = isPublicEntity ctx ent
+    let entName = sanitizeEntityName ent
+    let body =
+        ent.FSharpFields |> Seq.choose (fun x ->
+            match x.LiteralValue with
+            | Some(:? int as i) -> Some(string i, makeStrConst x.Name)
+            | _ -> None)
+        |> Seq.toList |> makeJsObject (Some range)
+    // Bind entity name to context to prevent name clashes
+    let ctx, ident = bindIdentWithExactName com ctx Fable.Any None entName
+    let m = Fable.Member(entName, Fable.Field, Fable.StaticLoc, [], body.Type)
+    let decl = Fable.MemberDeclaration(m, isPublic, Some ident.Name, [], body, Some range)
+    let publicName = if isPublic then Some entName else None
+    declInfo.AddDeclaration(decl, ?publicName=publicName)
+    ctx
+
 let private transformMemberDecl (com: IFableCompiler) ctx (declInfo: DeclInfo)
     (meth: FSharpMemberOrFunctionOrValue) (args: FSharpMemberOrFunctionOrValue list list) (body: FSharpExpr) =
     let range = getMethLocation meth |> makeRange
@@ -1175,7 +1192,7 @@ let rec private transformEntityDecl (com: IFableCompiler) ctx (declInfo: DeclInf
         declInfo.AddIgnoredChild ent
         ctx
     elif ent.IsEnum then
-        ctx // TODO: Enumerations
+        addEnumToDeclInfo com ctx declInfo range ent
     else
         let childDecls =
             let ctx = { ctx with enclosingModule = EnclosingModule(com.GetEntity ent, isPublicEntity ctx ent) }
