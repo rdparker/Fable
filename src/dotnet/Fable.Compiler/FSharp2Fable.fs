@@ -953,7 +953,7 @@ type private DeclInfo(com, fileName) =
     let publicNameConflicts name =
         let conflicts = publicNames.Contains name
         if conflicts then
-            "Public namespaces, modules, types or functions with same name at same level are not supported: " + name
+            "Public modules, types or functions with same name at same level are not supported: " + name
             |> addError com fileName None
         else
             publicNames.Add name
@@ -1024,12 +1024,15 @@ type private DeclInfo(com, fileName) =
             decls.Add(Decl decl)
     member self.AddChild (com: IFableCompiler, ctx, newChild: FSharpEntity, privateName, newChildDecls: _ list) =
         let isPublic = isPublicEntity ctx newChild
-        let conflicts = isPublic && publicNameConflicts (sanitizeEntityName newChild)
+        let conflicts =
+            isPublic && (not newChild.IsNamespace)
+            && publicNameConflicts (sanitizeEntityName newChild)
         if not conflicts then
             let ent = Ent (com.GetEntity newChild, isPublic,
                         privateName, ResizeArray<_> newChildDecls,
                         getEntityLocation newChild |> makeRange |> Some)
-            children.Add(newChild.FullName, ent)
+            if not <| children.ContainsKey(newChild.FullName) then
+                children.Add(newChild.FullName, ent)
             decls.Add(ent)
     member self.AddIgnoredChild (ent: FSharpEntity) =
         // Entities with no FullName will be abbreviations, so we don't need to

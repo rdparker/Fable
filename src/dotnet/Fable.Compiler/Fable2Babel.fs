@@ -94,7 +94,10 @@ and IDeclarePlugin =
         -> (U2<Statement, ModuleDeclaration> list) option
 
 type IDeclareMember =
-    abstract member DeclareMember: SourceLocation option * string * string option * bool * bool * Identifier option * Expression -> U2<Statement, ModuleDeclaration> list
+    abstract member DeclareMember:
+        range:SourceLocation option * publicName:string * privateName:string option
+        * isPublic:bool * isMutable:bool * isModuleOrNamespace:bool * modIdent:Identifier option
+        * body:Expression -> U2<Statement, ModuleDeclaration> list
 
 module Util =
     let inline (|EntKind|) (ent: Fable.Entity) = ent.Kind
@@ -864,7 +867,6 @@ module Util =
                 ?returnType=returnType, ?typeParams=typeParams, ?loc=range)
             |> U2<_,ClassProperty>.Case1
         let baseClass = baseClass |> Option.map (transformExpr com ctx)
-        let interfaces = match ent with | Some e -> e.Interfaces | None -> []
         decls
         |> List.map (function
             | Fable.MemberDeclaration(m, _, _, args, body, range) ->
@@ -915,19 +917,33 @@ module Util =
         // ExpressionStatement(macroExpression funcExpr.loc "process.exit($0)" [main], ?loc=funcExpr.loc)
         ExpressionStatement(main, ?loc=funcExpr.loc) :> Statement
 
-    let declareNestedModMember range publicName privateName isPublic isMutable modIdent expr =
+    let declareNestedModMember range publicName privateName isPublic isMutable isModuleOrNamespace modIdent expr =
         let privateName = defaultArg privateName publicName
+        let varIdent = identFromName privateName
         match isPublic, modIdent with
-        | true, Some modIdent -> assign range (get modIdent publicName) expr
-        | _ -> expr
-        |> varDeclaration range (identFromName privateName) isMutable :> Statement
-        |> U2.Case1 |> List.singleton
+        | true, Some modIdent ->
+            let parentMember = get modIdent publicName
+            if isModuleOrNamespace then
+                let varDecl =
+                    LogicalExpression(LogicalOr, parentMember, ObjectExpression [])
+                    |> assign None parentMember
+                    |> varDeclaration None varIdent false
+                    :> Statement |> U2.Case1
+                let iifeDecl =
+                    let callExpr = CallExpression(expr, [U2.Case1(varIdent :> Expression)], ?loc=range)
+                    ExpressionStatement(callExpr, ?loc=range) :> Statement |> U2.Case1
+                // This will be reversed later
+                [iifeDecl; varDecl]
+            else
+                assign range parentMember expr
+                |> varDeclaration range varIdent isMutable
+                :> Statement |> U2.Case1 |> List.singleton
+        | _ ->
+            [varDeclaration range varIdent isMutable expr :> Statement |> U2.Case1]
 
-    let declareRootModMember range publicName privateName isPublic isMutable _
-                             (expr: Expression) =
-        let privateName = defaultArg privateName publicName
-        let privateIdent = identFromName privateName
-        let decl: Declaration =
+    type DeclareRootModMember() =
+        let exportedNamespaces = HashSet()
+        let createNonModuleDeclaration(privateIdent, isMutable, expr: Expression, range): Declaration =
             match expr with
             | :? ClassExpression as e ->
                 upcast ClassDeclaration(e.body, privateIdent,
@@ -936,17 +952,38 @@ module Util =
                 upcast FunctionDeclaration(privateIdent, e.``params``, e.body,
                     ?returnType=e.returnType, ?typeParams=e.typeParameters, ?loc=e.loc)
             | _ -> upcast varDeclaration range privateIdent isMutable expr
-        match isPublic with
-        | false -> U2.Case1 (decl :> Statement) |> List.singleton
-        | true when publicName = privateName ->
-            ExportNamedDeclaration(decl, ?loc=range)
-            :> ModuleDeclaration |> U2.Case2 |> List.singleton
-        | true ->
-            // Replace ident forbidden chars of root members, see #207
-            let publicName = Naming.replaceIdentForbiddenChars publicName
-            let expSpec = ExportSpecifier(privateIdent, Identifier publicName)
-            let expDecl = ExportNamedDeclaration(specifiers=[expSpec])
-            [expDecl :> ModuleDeclaration |> U2.Case2; decl :> Statement |> U2.Case1]
+        let createExportsDeclaration(publicName, privateName, privateIdent, decl, range) =
+            if publicName = privateName then
+                ExportNamedDeclaration(decl, ?loc=range)
+                :> ModuleDeclaration |> U2.Case2 |> List.singleton
+            else
+                // Replace ident forbidden chars of root members, see #207
+                let publicName = Naming.replaceIdentForbiddenChars publicName
+                let expSpec = ExportSpecifier(privateIdent, Identifier publicName)
+                let expDecl = ExportNamedDeclaration(specifiers=[expSpec])
+                // This will be reversed later
+                [expDecl :> ModuleDeclaration |> U2.Case2; decl :> Statement |> U2.Case1]
+        interface IDeclareMember with
+          member __.DeclareMember(range, publicName, privateName, isPublic, isMutable, isModuleOrNamespace, _, expr: Expression) =
+            let privateName = defaultArg privateName publicName
+            let privateIdent = identFromName privateName
+            if isPublic then
+                if isModuleOrNamespace then
+                    if exportedNamespaces.Contains(privateName) then
+                        let expr = CallExpression(expr, [U2.Case1(privateIdent :> Expression)], ?loc=range)
+                        ExpressionStatement(expr, ?loc=range) :> Statement
+                        |> U2.Case1 |> List.singleton
+                    else
+                        exportedNamespaces.Add(privateName) |> ignore
+                        let callExpr = CallExpression(expr, [ObjectExpression [] :> Expression |> U2.Case1], ?loc=range)
+                        let decl = varDeclaration range privateIdent isMutable callExpr
+                        createExportsDeclaration(publicName, privateName, privateIdent, decl, range)
+                else
+                    let decl = createNonModuleDeclaration(privateIdent, isMutable, expr, range)
+                    createExportsDeclaration(publicName, privateName, privateIdent, decl, range)
+            else
+                createNonModuleDeclaration(privateIdent, isMutable, expr, range)
+                :> Statement |> U2.Case1 |> List.singleton
 
     let transformModMember (com: IBabelCompiler) ctx (helper: IDeclareMember) modIdent
                            (m: Fable.Member, isPublic, privName, args, body, range) =
@@ -975,7 +1012,7 @@ module Util =
             match range, expr.loc with Some r1, Some r2 -> Some(r1 + r2) | _ -> None
         if m.TryGetDecorator("EntryPoint").IsSome
         then declareEntryPoint com ctx expr |> U2.Case1 |> List.singleton
-        else helper.DeclareMember(memberRange, m.OverloadName, privName, isPublic, m.IsMutable, modIdent, expr)
+        else helper.DeclareMember(memberRange, m.OverloadName, privName, isPublic, m.IsMutable, false, modIdent, expr)
 
     let declareInterfaceEntity (com: IBabelCompiler) (ent: Fable.Entity) =
         // TODO: Add `extends` (inherited interfaces)
@@ -992,7 +1029,7 @@ module Util =
         let classDecl =
             // Don't create a new context for class declarations
             let classExpr = transformClass com ctx entRange (Some ent) baseClass entDecls
-            helper.DeclareMember(entRange, ent.Name, Some privateName, isPublic, false, modIdent, classExpr)
+            helper.DeclareMember(entRange, ent.Name, Some privateName, isPublic, false, false, modIdent, classExpr)
         let classDecl =
             (declareType com ctx ent |> U2.Case1)::classDecl
         // Check if there's a static constructor
@@ -1016,17 +1053,13 @@ module Util =
             let ctx = { ctx with moduleFullName = ent.FullName }
             let helper =
                 { new IDeclareMember with
-                    member __.DeclareMember(a,b,c,d,e,f,g) =
-                        declareNestedModMember a b c d e f g }
+                    member __.DeclareMember(a,b,c,d,e,f,g,h) =
+                        declareNestedModMember a b c d e f g h }
             transformModDecls com ctx helper (Some modIdent) entDecls
             |> List.map (function
                 | U2.Case1 statement -> statement
                 | U2.Case2 _ -> failwith "Unexpected export in nested module")
-        CallExpression(
-            FunctionExpression([modIdent],
-                block entRange modDecls, ?loc=entRange),
-            [U2.Case1 (upcast ObjectExpression [])],
-            ?loc=entRange)
+        FunctionExpression([modIdent], block entRange modDecls, ?loc=entRange)
 
     and transformModDecls (com: IBabelCompiler) ctx (helper: IDeclareMember) modIdent decls =
         let pluginDeclare (decl: Fable.Declaration) =
@@ -1039,8 +1072,8 @@ module Util =
             | Fable.ActionDeclaration (e,_) ->
                 transformStatement com ctx e
                 |> List.map U2.Case1
-                // The accumulated statements will be reverted,
-                // so we have to revert these too
+                // The accumulated statements will be reversed,
+                // so we have to reverse these too
                 |> List.rev
                 |> List.append <| acc
             | Fable.MemberDeclaration(m, isPublic, privName, args, body, r) ->
@@ -1061,7 +1094,7 @@ module Util =
                     declareClass com ctx helper modIdent (ent,isPublic, privName, entDecls, entRange, None)
                 | Fable.Module ->
                     let m = transformNestedModule com ctx ent entDecls entRange
-                    helper.DeclareMember(entRange, ent.Name, Some privName, isPublic, false, modIdent, m)
+                    helper.DeclareMember(entRange, ent.Name, Some privName, isPublic, false, true, modIdent, m)
                 |> List.append <| acc) []
         |> fun decls ->
             match modIdent with
@@ -1181,10 +1214,7 @@ module Compiler =
                 |> function
                 | Some rootDecls -> rootDecls
                 | None ->
-                    let helper =
-                        { new IDeclareMember with
-                            member __.DeclareMember(a,b,c,d,e,f,g) =
-                                declareRootModMember a b c d e f g }
+                    let helper = new DeclareRootModMember()
                     transformModDecls com ctx helper None file.Declarations
             let dependencies =
                 com.GetAllImports()
