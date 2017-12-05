@@ -581,7 +581,14 @@ let private transformExpr (com: IFableCompiler) ctx fsExpr =
     (** ## Erased *)
     | ErasableClosure(Transform com ctx expr) -> expr
 
-    | BasicPatterns.Coerce(_targetType, Transform com ctx inpExpr) -> inpExpr
+    | BasicPatterns.Coerce(NonAbbreviatedType targetType, (Transform com ctx fableExpr as inpExpr)) ->
+        if tryTypeFullName targetType = Some "System.Collections.Generic.IEnumerable`1"
+            && tryTypeFullName inpExpr.Type = Some "System.String" then
+            let r, typ = makeRangeFrom fsExpr, makeType com ctx.typeArgs fsExpr.Type
+            InstanceCall(fableExpr, "split", [makeStrConst ""])
+            |> makeCall r typ
+        else fableExpr
+
     // TypeLambda is a local generic lambda
     // e.g, member x.Test() = let typeLambda x = x in typeLambda 1, typeLambda "A"
     // Sometimes these must be inlined, but that's resolved in BasicPatterns.Let (see below)

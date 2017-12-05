@@ -15,6 +15,13 @@ let ``String literal addition is optimized``() =
       "bar" + aLiteral |> equal "barfoo"
       "bar" + notALiteral |> equal "barfoo"
 
+[<Test>]
+let ``String enumeration handles Unicode surrogate pairs``() = // See #1279
+    let unicodeString = ".\U0001f404."
+    String.length unicodeString |> equal 4
+    Seq.zip [|char "."; char 0xd83d; char 0xdc04; char "."|] unicodeString
+    |> Seq.iter (fun (c1,c2) -> equal c1 c2)
+
 // Format
 
 [<Test>]

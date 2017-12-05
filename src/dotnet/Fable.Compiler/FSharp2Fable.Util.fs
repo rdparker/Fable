@@ -121,6 +121,11 @@ module Helpers =
         let typ = nonAbbreviatedType typ
         if typ.HasTypeDefinition then Some typ.TypeDefinition else None
 
+    let tryTypeFullName (typ: FSharpType) =
+        match tryDefinition typ with
+        | Some tdef -> tdef.TryGetFullName()
+        | None -> None
+
     // Sometimes accessing `EnclosingEntity` throws an error (e.g. compiler generated
     // methods as in #237) so this prevents uncaught exceptions
     let tryEnclosingEntity (meth: FSharpMemberOrFunctionOrValue) =
