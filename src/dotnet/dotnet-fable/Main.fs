@@ -2,13 +2,9 @@ module Fable.CLI.Main
 
 open System
 open System.IO
-open System.Diagnostics
-open System.Reflection
-open System.Runtime.InteropServices
 open System.Net
-open Microsoft.FSharp.Compiler.SourceCodeServices
-open Newtonsoft.Json
-open Parser
+open System.Diagnostics
+open System.Runtime.InteropServices
 open StateUtil
 
 type ProcessOptions(?envVars, ?redirectOutput) =
@@ -16,7 +12,7 @@ type ProcessOptions(?envVars, ?redirectOutput) =
     member val RedirectOuput = defaultArg redirectOutput false
 
 type Arguments =
-    { timeout: int; port: int; commandArgs: string option }
+    { port: int; coreJs: string option; commandArgs: string option }
 
 let konst k _ = k
 
@@ -107,10 +103,9 @@ let parseArguments args =
                 printfn "Value for --port is not a valid integer, using default port"
                 Constants.DEFAULT_PORT
         | None -> Constants.DEFAULT_PORT
-    let timeout =
-        match tryFindArgValue "--timeout" args with
-        | Some timeout -> int timeout
-        | None -> -1
+    let coreJs =
+        tryFindArgValue "--core-js" args
+        |> Option.map Fable.Path.normalizeFullPath
     let commandArgs =
         // Check first --args for compatibility with the old way
         match tryFindArgValue "--args" args with
@@ -119,18 +114,18 @@ let parseArguments args =
             match args |> Array.tryFindIndex ((=) "--") with
             | Some i -> args.[(i+1)..] |> String.concat " " |> Some
             | None -> None
-    { port = port; timeout = timeout; commandArgs = commandArgs}
+    { port = port; coreJs = coreJs; commandArgs = commandArgs}
 
-let startServer port timeout onMessage continuation =
+let startServer port onMessage continuation =
     try
-        let work = Server.start port timeout onMessage
+        let work = Server.start port onMessage
         continuation work
     with
     | ex ->
-        printfn "Cannot start Fable daemon, please check the port %i is free: %s" port ex.Message
+        printfn "Cannot start Fable daemon, please check port %i is free: %s" port ex.Message
         1
 
-let startServerWithProcess workingDir port exec args =
+let startServerWithProcess workingDir (fableArgs: Arguments) exec args =
     let mutable disposed = false
     let killProcessAndServer =
         fun (p: Process) ->
@@ -138,12 +133,12 @@ let startServerWithProcess workingDir port exec args =
                 disposed <- true
                 printfn "Killing process..."
                 p.Kill()
-                Server.stop port |> Async.RunSynchronously
-    let agent = startAgent()
-    startServer port -1 agent.Post <| fun listen ->
+                Server.stop fableArgs.port |> Async.RunSynchronously
+    let agent = startAgent fableArgs.coreJs
+    startServer fableArgs.port agent.Post <| fun listen ->
         Async.Start listen
         let p =
-            ProcessOptions(envVars=Map["FABLE_SERVER_PORT", string port])
+            ProcessOptions(envVars=Map["FABLE_SERVER_PORT", string fableArgs.port])
             |> startProcess workingDir exec args
         Console.CancelKeyPress.Add (fun _ -> killProcessAndServer p)
         #if NETFX
@@ -153,7 +148,7 @@ let startServerWithProcess workingDir port exec args =
         #endif
         p.WaitForExit()
         disposed <- true
-        Server.stop port |> Async.RunSynchronously
+        Server.stop fableArgs.port |> Async.RunSynchronously
         p.ExitCode
 
 let checkFlags(args: string[]) =
@@ -162,7 +157,6 @@ let checkFlags(args: string[]) =
         | Some _ -> true
         | None -> false
     Flags.logVerbose <- hasFlag "--verbose"
-    Flags.checkCoreVersion <- not(hasFlag "--no-version-check")
 
 let (|StartsWith|_|) (pattern: string) (str: string) =
     if str.StartsWith(pattern)
@@ -185,9 +179,9 @@ Commands:
   webpack-dev-server  Run Fable while Webpack development server is running
 
 Fable arguments:
-  --timeout           Stop the daemon if timeout (ms) is reached
   --port              Port number (default %d) or "free" to choose a free port
   --verbose           Print more info during execution
+  --core-js           Overrides path to fable-core JS files (to test new versions)
 
 To pass arguments to the script, write them after `--`. Example:
 
@@ -223,7 +217,7 @@ Where 'start' and 'build' are the names of scripts in package.json:
             | None -> "run " + args.[0]
         let workingDir =
             Directory.GetCurrentDirectory() |> findPackageJsonDir
-        startServerWithProcess workingDir fableArgs.port npmOrYarn execArgs
+        startServerWithProcess workingDir fableArgs npmOrYarn execArgs
 
 [<EntryPoint>]
 let main argv =
@@ -234,8 +228,8 @@ let main argv =
     | Some "--version" -> printfn "%s" Constants.VERSION; 0
     | Some "start" ->
         let args = argv.[1..] |> parseArguments
-        let agent = startAgent()
-        startServer args.port args.timeout agent.Post (Async.RunSynchronously >> konst 0)
+        let agent = startAgent args.coreJs
+        startServer args.port agent.Post (Async.RunSynchronously >> konst 0)
     | Some "npm-run" ->
         runNpmOrYarn "npm" argv.[1..]
     | Some (StartsWith "npm-" command) ->
@@ -251,7 +245,7 @@ let main argv =
             | Some scriptArgs -> argv.[1] + " " + scriptArgs
             | None -> argv.[1]
         let workingDir = Directory.GetCurrentDirectory()
-        startServerWithProcess workingDir args.port "node" execArgs
+        startServerWithProcess workingDir args "node" execArgs
     | Some ("webpack" | "webpack-dev-server" as webpack) ->
         let containsWebpackConfig dir =
             File.Exists(IO.Path.Combine(dir, "webpack.config.js"))
@@ -273,13 +267,13 @@ let main argv =
             match args.commandArgs with
             | Some args -> webpackScript + " " + args
             | None -> webpackScript
-        startServerWithProcess workingDir args.port "node" webpackScript
+        startServerWithProcess workingDir args "node" webpackScript
     | Some "shell-run" ->
         let cmd = argv.[1]
         let args = argv.[2..] |> parseArguments
         let execArgs = defaultArg args.commandArgs ""
         let workingDir = Directory.GetCurrentDirectory()
-        startServerWithProcess workingDir args.port cmd execArgs
+        startServerWithProcess workingDir args cmd execArgs
     | Some "add" -> printfn "The add command has been deprecated. Use Paket to manage Fable libraries."; 0
     | Some cmd -> printfn "Unrecognized command: %s. Use `dotnet fable --help` to see available options." cmd; 0
     | None -> printfn "Command missing. Use `dotnet fable --help` to see available options."; 0

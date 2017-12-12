@@ -225,12 +225,16 @@ let compile (com: Compiler) (project: Project) (filePath: string) =
 
 type Command = string * (string -> unit)
 
-let startAgent () = MailboxProcessor<Command>.Start(fun agent ->
+let startAgent coreJsDir = MailboxProcessor<Command>.Start(fun agent ->
     let rec loop (checker: FSharpChecker) (state: State) = async {
         let! msg, replyChannel = agent.Receive()
         let newState =
             try
                 let msg = Parser.parse msg
+                let msg =
+                    match coreJsDir with
+                    | Some coreJs -> { msg with fableCore = Some coreJs }
+                    | None -> msg
                 // lazy sprintf "Received message %A" msg |> Log.logVerbose
                 let isUpdated, state, activeProject = updateState checker state msg
                 let comOptions =
