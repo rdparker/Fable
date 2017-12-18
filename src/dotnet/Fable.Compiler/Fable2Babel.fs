@@ -81,7 +81,7 @@ type IBabelCompiler =
     abstract TransformClass: Context -> SourceLocation option -> Fable.Expr option ->
         Fable.Declaration list -> ClassExpression
     abstract TransformObjectExpr: Context -> Fable.ObjExprMember list ->
-        Fable.Expr option -> SourceLocation option -> Expression
+        (Fable.Expr * Fable.Expr list) option -> SourceLocation option -> Expression
 
 and IDeclarePlugin =
     inherit IPlugin
@@ -430,16 +430,8 @@ module Util =
         | Fable.LogicalOp _ | Fable.BinaryOp _ | Fable.UnaryOp _ ->
             "Unexpected stand-alone operator detected" |> Fable.Util.attachRange r |> failwith
 
-    let transformObjectExpr (com: IBabelCompiler) ctx
-                            (members, baseClass, range): Expression =
-        match baseClass with
-        | Some _ as baseClass ->
-            members
-            |> List.map (fun (m, args, body: Fable.Expr) ->
-                Fable.MemberDeclaration(m, true, None, args, body, body.Range))
-            |> com.TransformClass ctx range baseClass
-            |> fun c -> upcast NewExpression(c, [], ?loc=range)
-        | None ->
+    let transformObjectExpr (com: IBabelCompiler) ctx (members, baseClass, range): Expression =
+        let members =
             members |> List.map (fun (m: Fable.Member, args, body: Fable.Expr) ->
                 let key, computed =
                     match m.Computed with
@@ -468,8 +460,13 @@ module Util =
                     ObjectProperty(key, com.TransformExpr ctx body,
                             computed=computed, ?loc=body.Range)
                     |> U3.Case1)
-            |> fun props ->
-                upcast ObjectExpression(props, ?loc=range)
+        let objExpr: Expression = upcast ObjectExpression(members, ?loc=range)
+        match baseClass with
+        | None -> objExpr
+        | Some(baseClass, consArgs) ->
+            let baseClass: Node = upcast com.TransformExpr ctx baseClass
+            let consArgs: Node list = consArgs |> List.map (fun arg -> upcast com.TransformExpr ctx arg)
+            macroExpression None "Object.assign(new $1($2...), $0)" ((upcast objExpr)::baseClass::consArgs)
 
     let transformApply com ctx (callee, args, kind, range): Expression =
         let args =
