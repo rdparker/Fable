@@ -297,22 +297,17 @@ let private transformObjExpr (com: IFableCompiler) (ctx: Context) (fsExpr: FShar
         | ThisAvailable -> Some [None, com.GetUniqueVar() |> makeIdentExpr]
         | ThisCaptured(prevThis, prevVars) ->
             (prevThis, com.GetUniqueVar() |> makeIdentExpr)::prevVars |> Some
-    let baseClass, baseCons =
+    let baseClass =
         match baseCallExpr with
         | BasicPatterns.Call(None, meth, _, _, args) ->
-            let args = List.map (com.Transform ctx) args
-            let typ, range = makeType com ctx.typeArgs baseCallExpr.Type, makeRange baseCallExpr.Range
-            let baseClass =
-                tryEnclosingEntity meth
-                |> Option.map (fun ent ->
+            let baseConsArgs = List.map (com.Transform ctx) args
+            tryEnclosingEntity meth
+            |> Option.map (fun ent ->
+                let baseClass =
                     makeTypeFromDef com ctx.typeArgs ent []
-                    |> makeNonGenTypeRef com)
-            let baseCons =
-                let c = Fable.Apply(Fable.Value Fable.Super, args, Fable.ApplyMeth, typ, Some range)
-                let m = Fable.Member(".ctor", Fable.Constructor, Fable.InstanceLoc, [], Fable.Any)
-                Some(m, [], c)
-            baseClass, baseCons
-        | _ -> None, None
+                    |> makeNonGenTypeRef com
+                baseClass, baseConsArgs)
+        | _ -> None
     let members =
         (objType, overrides)::otherOverrides
         |> List.collect (fun (typ, overrides) ->
@@ -368,10 +363,9 @@ let private transformObjExpr (com: IFableCompiler) (ctx: Context) (fsExpr: FShar
         |> List.filter (Naming.ignoredInterfaces.Contains >> not)
         |> List.distinct
     let members =
-        [ match baseCons with Some c -> yield c | None -> ()
-          yield! members
-          if List.contains "System.Collections.Generic.IEnumerable" interfaces
-          then yield makeIteratorMethodArgsAndBody()
+        [ yield! members
+          if List.contains "System.Collections.Generic.IEnumerable" interfaces then
+            yield makeIteratorMethodArgsAndBody()
           yield makeReflectionMethodArgsAndBody com None false false interfaces None None
         ]
     let range = makeRangeFrom fsExpr

@@ -314,7 +314,7 @@ type ObjExprMember = Member * Ident list * Expr
 type Expr =
     // Pure Expressions
     | Value of value: ValueKind
-    | ObjExpr of decls: ObjExprMember list * interfaces: string list * baseClass: Expr option * range: SourceLocation option
+    | ObjExpr of decls: ObjExprMember list * interfaces: string list * baseClass: (Expr * Expr list) option * range: SourceLocation option
     | IfThenElse of guardExpr: Expr * thenExpr: Expr * elseExpr: Expr * range: SourceLocation option
     | Apply of callee: Expr * args: Expr list * kind: ApplyKind * typ: Type * range: SourceLocation option
     | Quote of Expr
@@ -383,7 +383,10 @@ type Expr =
         match x with
         | Value v -> v.ImmediateSubExpressions
         | ObjExpr (decls,_,baseClass,_) ->
-            (decls |> List.map (fun (_,_,e) -> e))@(Option.toList baseClass)
+            let decls = decls |> List.map (fun (_,_,e) -> e)
+            match baseClass with
+            | None -> decls
+            | Some(baseClass, consArgs) -> baseClass::consArgs @ decls
         | VarDeclaration (_,e,_,_) -> [e]
         | Wrapped (e,_) -> [e]
         | Quote e -> [e]
