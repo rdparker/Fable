@@ -29,3 +29,15 @@ let equal expected actual =
 // You'll have to run your test manually, sorry!
 // ``My Test``()
 
+type Foo() =
+    new(_i: int) = Foo()
+    member __.Subtract(x,y) = x - y
+    member __.Add(x) = x + 5
+    member __.Add(x, y) = x + y
+    [<CompiledName("Foo")>]
+    static member Add(x, y) = x + y
+    static member Add(x, y, z) = x + y + z
+    static member Add(x, y, z, u) = x + y + z + u
+    static member (+) (x, y) = x + y
+    static member (+) (x, y) = x + Int32.Parse(y)
+    // static member (+) (x, y, z) = x + y + z

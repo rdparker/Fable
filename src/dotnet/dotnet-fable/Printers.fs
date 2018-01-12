@@ -2,10 +2,50 @@ module Fable.CLI.Printers
 
 open System
 open System.IO
+open System.Collections.Generic
 open Microsoft.FSharp.Compiler.SourceCodeServices
 open Newtonsoft.Json
 open Fable
 open Fable.AST
+open System.Collections.Generic
+
+let findOverloads isInstance (e: FSharpEntity) =
+    let add (m: FSharpMemberOrFunctionOrValue) (parentDic: Dictionary<_,_>) =
+        let name = m.CompiledName
+        if parentDic.ContainsKey(name) then
+            // printfn "Overloads: %A" <| m.Overloads(false)
+            let ar: ResizeArray<_> = parentDic.[name]
+            ar.Add(m)
+        else
+            let ar = ResizeArray()
+            ar.Add(m)
+            parentDic.Add(name, ar)
+    let overloads = Dictionary()
+    for m in e.MembersFunctionsAndValues do
+        if m.IsInstanceMember = isInstance then
+            add m overloads
+    overloads
+
+let findOverloadIndex (m: FSharpMemberOrFunctionOrValue): int option =
+    let findOverloadIndex' (m: FSharpMemberOrFunctionOrValue) (overloads: Dictionary<_,_>) =
+        let name = m.CompiledName
+        if overloads.ContainsKey(name) then
+            let ar: ResizeArray<FSharpMemberOrFunctionOrValue> = overloads.[name]
+            if ar.Count > 1 then
+                if not m.IsInstanceMember then
+                    printfn "Find overload %s in array with count %i" name ar.Count
+                // .Equals() doesn't work. TODO: Compare arg types for trait calls
+                // .IsEffectivelySameAs() doesn't work for constructors
+                ar |> Seq.tryFindIndex(fun x ->
+                    let res =
+                        (m.CurriedParameterGroups, x.CurriedParameterGroups)
+                        ||> (Seq.compareWith (Seq.compareWith (fun x y -> if x = y then 0 else -1)))
+                    res = 0)
+            else None
+        else None
+    m.EnclosingEntity |> Option.bind (fun e ->
+        let overloads = findOverloads m.IsInstanceMember e
+        findOverloadIndex' m overloads)
 
 let attribsOfSymbol (s:FSharpSymbol) =
     [ match s with
@@ -45,6 +85,12 @@ let attribsOfSymbol (s:FSharpSymbol) =
 
         | :? FSharpMemberOrFunctionOrValue as v ->
             yield "owner: " + match v.EnclosingEntity with | Some e -> e.CompiledName | _ -> "<unknown>"
+            // match v.Overloads(true) with
+            // | Some overloads -> yield Seq.length overloads |> sprintf "overloads: %i"
+            // | None -> ()
+            match findOverloadIndex v with
+            | Some i -> yield sprintf "overload idx: %i" i
+            | None -> ()
             if v.IsActivePattern then yield "active_pattern"
             if v.IsDispatchSlot then yield "dispatch_slot"
             if v.IsModuleValueOrMember && not v.IsMember then yield "val"
