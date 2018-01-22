@@ -568,8 +568,10 @@ let rec ensureArity com argTypes args =
         | GenericParam _, (Type(Function(args,_,isCurried)) as lambda)
                 when isCurried && List.isMultiple args ->
             makeDynamicCurriedLambda lambda.Range lambda.Type lambda
-        | NeedsWrapping (expected, actual, returnType) ->
-            wrap com returnType arg expected actual
+        | NeedsWrapping (_expected, _actual, returnType) ->
+            // Wrapping the lambda can cause side effects to be executed too many times (see #1330)
+            // wrap com returnType arg expected actual
+            makeDynamicCurriedLambda arg.Range returnType arg
         | _ -> arg)
 
 and makeApply com range typ callee (args: Expr list) =

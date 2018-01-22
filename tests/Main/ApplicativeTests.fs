@@ -798,3 +798,33 @@ module FullApplication =
         let procedureName = GetName SomeProcedure
         equal "SomeProcedure" procedureName
 #endif
+
+[<Test>]
+let ``Curried inner functions don't apply side effects multiple times``() = // See #1330
+  let mutable callCount = 0
+  let createDivisibleByPredicate divisibleBy =
+    callCount <- callCount + 1
+    fun x -> x % divisibleBy = 0
+  let satisfyAllPredicates predicateList num =
+    predicateList
+    |> List.map (fun pred -> pred num)
+    |> List.reduce (&&)
+  let predicates = [ 2; 3 ] |> List.map createDivisibleByPredicate
+  let _ = [ 1 .. 20 ] |> List.filter (satisfyAllPredicates predicates)
+  equal 2 callCount
+
+let mutable callCount = 0
+
+let createDivisibleByPredicate divisibleBy =
+    callCount <- callCount + 1
+    fun x -> x % divisibleBy = 0
+
+[<Test>]
+let ``Curried outer functions don't apply side effects multiple times``() =  // See #1330
+  let satisfyAllPredicates predicateList num =
+    predicateList
+    |> List.map (fun pred -> pred num)
+    |> List.reduce (&&)
+  let predicates = [ 2; 3 ] |> List.map createDivisibleByPredicate
+  let _ = [ 1 .. 20 ] |> List.filter (satisfyAllPredicates predicates)
+  equal 2 callCount

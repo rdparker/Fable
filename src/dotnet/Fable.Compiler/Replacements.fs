@@ -1812,7 +1812,7 @@ module AstPass =
             | Some c, _ ->
                 match args with
                 | [] -> icall "sort" (c, [compareFn]) |> Some
-                | [Type (Fable.Function _)] -> icall "sort" (c, args) |> Some
+                | [_compareFn] -> icall "sort" (c, args) |> Some
                 | _ -> None
             | None, Seq -> ccall "Seq" "sortWith" (compareFn::args) |> Some
             | None, List -> ccall "Seq" "sortWith" (compareFn::args) |> toList com i |> Some
