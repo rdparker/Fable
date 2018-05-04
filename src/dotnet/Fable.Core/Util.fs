@@ -103,6 +103,8 @@ module Naming =
     let umdModules =
         set ["commonjs"; "amd"; "umd"]
 
+    let isInitialIdentChar c = System.Char.IsLetter (c) || c = '_'
+
     let isIdentChar c = System.Char.IsLetterOrDigit (c) || c = '_'
 
     let hasIdentForbiddenChars (ident: string) =
@@ -110,16 +112,21 @@ module Naming =
         while i < ident.Length && (isIdentChar ident.[i]) do i <- i + 1
         i < ident.Length
 
-    let replaceIdentForbiddenChars (ident: string) =
+    let mapIdentChars<'T> (f: (char->bool) -> char -> 'T) (ident:string) =
         System.String.Concat(seq {
-            for c in ident ->
-                if isIdentChar c then string c
-                else sprintf "$%X$" (int c)
-            })
+        if ident.Length > 0 then
+            yield f isInitialIdentChar ident.[0]
+            for c in ident.[1..] -> f isIdentChar c
+        })
+
+    let replaceIdentForbiddenChars (ident: string) =
+        ident
+        |> mapIdentChars (fun test c ->
+            if test c then string c
+            else sprintf "$%X$" (int c))
 
     let sanitizeIdentForbiddenChars (ident: string) =
-        System.String(
-           [| for c in ident -> if isIdentChar c then c else '_' |] )
+        ident |> mapIdentChars (fun test c -> if test c then c else '_')
 
     let hasGenericPlaceholder (ident: string) =
         let i = ident.IndexOf(@"\$'")

@@ -164,3 +164,31 @@ let ``Nested module mutable values work``() = // See #986
     Util.Nested.nestedMutableValue |> equal "C"
     Util.Nested.getValueTimes2() |> equal "CC"
     Util.getNestedValueTimes3() |> equal "CCC"
+
+type I2barImported =
+    abstract foo: string
+
+#if FABLE_COMPILER
+[<Fable.Core.Import("*", "./js/2bar.js")>]
+let twobarAll: I2barImported = failwith "JS only"
+
+[<Test>]
+let ``Import module starting with a number``() =
+    twobarAll.foo |> equal "foo"
+    let twobarAll2: I2barImported = Fable.Core.JsInterop.importAll "./js/2bar.js"
+    twobarAll2.foo |> equal "foo"
+#endif
+
+type I3barImported =
+    abstract foo: string
+
+#if FABLE_COMPILER
+[<Fable.Core.Import("*", "./js/3bar.js")>]
+let threebarAll: I3barImported = failwith "JS only"
+
+[<Test>]
+let ``Import module differing only by initial number``() =
+    threebarAll.foo |> equal "bar"
+    let threebarAll2: I2barImported = Fable.Core.JsInterop.importAll "./js/3bar.js"
+    threebarAll2.foo |> equal "bar"
+#endif
